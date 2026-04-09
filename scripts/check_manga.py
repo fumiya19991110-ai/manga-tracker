@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 アウト 最新話チェッカー
 新しい話が更新されたらntfyに通知を送る
@@ -6,7 +7,6 @@
 import json
 import re
 import sys
-import time
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone, timedelta
@@ -41,31 +41,32 @@ def fetch_page(url: str) -> str:
         return raw.decode(charset, errors="replace")
 
 
-def find_latest_chapter(html: str) -> int | None:
+def find_latest_chapter(html: str, current: int) -> int | None:
     """
     HTMLからチャプター番号を抽出して最大値を返す。
-    複数のパターンを試みる。
+    有効範囲: current-10 ~ current+500 (年号2025などを除外)
     """
+    valid_min = max(100, current - 10)
+    valid_max = current + 500
+
     candidates = []
 
     # パターン1: href に chapter-数字 が含まれるリンク
     for m in re.finditer(r'href=["\'][^"\']*chapter[-/](\d+)', html, re.IGNORECASE):
-        candidates.append(int(m.group(1)))
-
-    # パターン2: 「第N話」テキスト
-    for m in re.finditer(r'第\s*(\d+)\s*話', html):
-        candidates.append(int(m.group(1)))
-
-    # パターン3: #N または /N/ のURL断片（3桁以上）
-    for m in re.finditer(r'href=["\'][^"\']*[/#](\d{3,})[/"\'?]', html):
         n = int(m.group(1))
-        if 200 <= n <= 9999:   # 妥当な話数の範囲
+        if valid_min <= n <= valid_max:
             candidates.append(n)
 
-    # パターン4: テキスト中の "270" のような数字（li/td内）
-    for m in re.finditer(r'<(?:li|td|span|div)[^>]*>\s*(?:第\s*)?(\d+)\s*(?:話|章|回)?\s*</(?:li|td|span|div)>', html):
+    # パターン2: 「N話」テキスト
+    for m in re.finditer(r'[^\d](\d+)\s*話', html):
         n = int(m.group(1))
-        if 200 <= n <= 9999:
+        if valid_min <= n <= valid_max:
+            candidates.append(n)
+
+    # パターン3: リンクURL中の3桁以上の数字
+    for m in re.finditer(r'href=["\'][^"\']*[/\-](\d{3,})[/"\'\-?]', html):
+        n = int(m.group(1))
+        if valid_min <= n <= valid_max:
             candidates.append(n)
 
     if not candidates:
@@ -84,17 +85,18 @@ def save_status(status: dict) -> None:
 
 
 def send_ntfy(chapter: int) -> None:
-    message = f"アウト 第{chapter}話が更新されました！\n{MANGA_URL}"
-    data = message.encode("utf-8")
+    body = f"アウト 第{chapter}話が更新されました！\n{MANGA_URL}"
+    data = body.encode("utf-8")
+    # HTTPヘッダーはASCIIのみ (latin-1制限のため日本語不可)
     req = urllib.request.Request(
         NTFY_URL,
         data=data,
         method="POST",
         headers={
             "Content-Type": "text/plain; charset=utf-8",
-            "Title": f"アウト 第{chapter}話 更新",
+            "Title": f"OUT ch.{chapter} updated",
             "Priority": "default",
-            "Tags": "manga,アウト",
+            "Tags": "books",
         },
     )
     with urllib.request.urlopen(req, timeout=15) as resp:
@@ -109,16 +111,15 @@ def main() -> None:
     print(f"チェック中: {MANGA_URL}")
 
     html = fetch_page(MANGA_URL)
-    found = find_latest_chapter(html)
+    found = find_latest_chapter(html, current_latest)
 
     now_jst = datetime.now(JST).isoformat()
     status["last_checked"] = now_jst
 
     if found is None:
-        print("チャプター番号を検出できませんでした（パース失敗）")
-        # デバッグ用に一部のHTMLを出力
-        print("--- HTML先頭500文字 ---")
-        print(html[:500])
+        print("チャプター番号を検出できませんでした")
+        print("--- HTML先頭1500文字 ---")
+        print(html[:1500])
         save_status(status)
         sys.exit(1)
 
