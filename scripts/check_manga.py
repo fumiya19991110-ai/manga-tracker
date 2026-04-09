@@ -26,7 +26,6 @@ HEADERS = {
     ),
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
-    "Accept-Encoding": "gzip, deflate, br",
     "Connection": "keep-alive",
 }
 
@@ -36,10 +35,6 @@ def fetch_page(url: str) -> str:
     with urllib.request.urlopen(req, timeout=30) as resp:
         content_type = resp.headers.get("Content-Type", "")
         raw = resp.read()
-        # gzip対応
-        if resp.headers.get("Content-Encoding") == "gzip":
-            import gzip
-            raw = gzip.decompress(raw)
         charset = "utf-8"
         if "charset=" in content_type:
             charset = content_type.split("charset=")[-1].strip()
